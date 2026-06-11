@@ -38,15 +38,16 @@ def _make_small_chart_image(text: str, target_path: str) -> None:
     # Add grid and nicer layout
     ax.yaxis.grid(True, color='#e6e6e6', linewidth=0.8)
     ax.set_axisbelow(True)
-    # Rotate and style x labels
+    # Rotate and style x labels (set ticks first to avoid warnings)
+    ax.set_xticks(range(len(labels)))
     ax.set_xticklabels(labels, rotation=30, fontsize=8)
     # Add value labels above bars
     try:
-        ax.bar_label(bars, labels=[str(int(v)) if float(v).is_integer() else f"{v:.1f}" for v in values], fontsize=8, padding=2)
+        ax.bar_label(bars, labels=[_format_value(v) for v in values], fontsize=8, padding=2)
     except Exception:
         # Older matplotlib may not have bar_label; fallback to manual text
         for b, v in zip(bars, values):
-            ax.text(b.get_x() + b.get_width() / 2, b.get_height(), f"{int(v) if float(v).is_integer() else f'{v:.1f}'}", ha='center', va='bottom', fontsize=8)
+            ax.text(b.get_x() + b.get_width() / 2, b.get_height(), _format_value(v), ha='center', va='bottom', fontsize=8)
 
     ax.set_ylabel('Count', fontsize=8)
     ax.tick_params(axis='y', labelsize=8)
@@ -84,20 +85,21 @@ def _make_chart_from_numeric(values: dict, target_path: str) -> None:
         try:
             for i, b in enumerate(bars):
                 w = b.get_width()
-                ax.text(w + max(vals) * 0.02, b.get_y() + b.get_height() / 2, f"{int(w) if float(w).is_integer() else f'{w:.1f}'}", va='center', fontsize=8)
+                ax.text(w + max(vals) * 0.02, b.get_y() + b.get_height() / 2, _format_value(w), va='center', fontsize=8)
         except Exception:
             pass
     else:
         fig, ax = plt.subplots(figsize=(2.8, 1.8), dpi=100)
         bars = ax.bar(labels, vals, color='#2b6cb0')
+        ax.set_xticks(range(len(labels)))
         ax.set_xticklabels(labels, rotation=30, fontsize=8)
         ax.yaxis.grid(True, color='#e6e6e6', linewidth=0.8)
         ax.set_ylabel('Value', fontsize=8)
         try:
-            ax.bar_label(bars, labels=[str(int(v)) if float(v).is_integer() else f"{v:.1f}" for v in vals], fontsize=8, padding=2)
+            ax.bar_label(bars, labels=[_format_value(v) for v in vals], fontsize=8, padding=2)
         except Exception:
             for b, v in zip(bars, vals):
-                ax.text(b.get_x() + b.get_width() / 2, b.get_height(), f"{int(v) if float(v).is_integer() else f'{v:.1f}'}", ha='center', va='bottom', fontsize=8)
+                ax.text(b.get_x() + b.get_width() / 2, b.get_height(), _format_value(v), ha='center', va='bottom', fontsize=8)
 
     plt.tight_layout()
     fig.savefig(target_path, transparent=True)
@@ -137,7 +139,7 @@ def _make_fancy_chart_from_numeric(values: dict, target_path: str) -> None:
 
     # Value labels at end of bars
     for b, v in zip(bars, vals):
-        ax.text(b.get_width() + max(vals) * 0.02, b.get_y() + b.get_height() / 2, f"{int(v) if float(v).is_integer() else f'{v:.1f}'}", va='center', fontsize=8, fontweight='bold')
+        ax.text(b.get_width() + max(vals) * 0.02, b.get_y() + b.get_height() / 2, _format_value(v), va='center', fontsize=8, fontweight='bold')
 
     # Minimal styling
     for spine in ax.spines.values():
@@ -174,7 +176,7 @@ def _make_fancy_chart_from_text(text: str, target_path: str) -> None:
     ax.xaxis.grid(True, color='#fff4e6', linewidth=0.8)
 
     for b, v in zip(bars, values):
-        ax.text(b.get_width() + max(values) * 0.02, b.get_y() + b.get_height() / 2, str(v), va='center', fontsize=8, fontweight='bold')
+        ax.text(b.get_width() + max(values) * 0.02, b.get_y() + b.get_height() / 2, _format_value(v), va='center', fontsize=8, fontweight='bold')
 
     for spine in ax.spines.values():
         spine.set_visible(False)
@@ -182,6 +184,23 @@ def _make_fancy_chart_from_text(text: str, target_path: str) -> None:
     plt.tight_layout()
     fig.savefig(target_path, transparent=True)
     plt.close(fig)
+
+
+def _format_value(v):
+    """Format numeric values: use percent for 0..1 floats, commas for large ints."""
+    try:
+        if isinstance(v, float) and 0 <= v <= 1:
+            # Show percentage
+            return f"{v*100:.1f}%"
+        if isinstance(v, (int,)):
+            return f"{v:,}"
+        if isinstance(v, float):
+            if abs(v - round(v)) < 1e-9:
+                return f"{int(round(v)):,}"
+            return f"{v:,.1f}"
+        return str(v)
+    except Exception:
+        return str(v)
 
 
 def create_presentation(title: str, slides: List[PPTSlide], out_path: str, background_image: str = None, add_small_graph: bool = False, add_fancy_graph: bool = False) -> str:
@@ -291,11 +310,17 @@ def create_presentation(title: str, slides: List[PPTSlide], out_path: str, backg
                         _make_fancy_chart_from_text(s.content or s.title or '', chart_path)
                     else:
                         _make_small_chart_image(s.content or s.title or '', chart_path)
-                # Insert chart at bottom-right
-                pic_width = Inches(2.0)
-                pic_height = Inches(1.5)
-                pic_left = prs.slide_width - pic_width - Inches(0.3)
-                pic_top = prs.slide_height - pic_height - Inches(0.3)
+                # Insert chart: larger and centered for fancy graphs, small bottom-right otherwise
+                if add_fancy_graph:
+                    pic_width = Inches(4.0)
+                    pic_height = Inches(2.5)
+                    pic_left = (prs.slide_width - pic_width) / 2
+                    pic_top = prs.slide_height - pic_height - Inches(0.4)
+                else:
+                    pic_width = Inches(2.0)
+                    pic_height = Inches(1.5)
+                    pic_left = prs.slide_width - pic_width - Inches(0.3)
+                    pic_top = prs.slide_height - pic_height - Inches(0.3)
                 slide.shapes.add_picture(chart_path, pic_left, pic_top, width=pic_width, height=pic_height)
                 try:
                     os.remove(chart_path)

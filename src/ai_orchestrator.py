@@ -194,11 +194,11 @@ Current state: {state}
                 # Execute the tool
                 if action.agent == "data_agent" and action.tool == "load_csv":
                     self.state["df"] = self._execute_tool(action)
-                    print("✓ CSV loaded")
+                    print("CSV loaded")
 
                 elif action.agent == "data_agent" and action.tool == "extract_insights":
                     self.state["insights"] = self._execute_tool(action)
-                    print(f"✓ Extracted {len(self.state['insights'])} insights")
+                    print(f"Extracted {len(self.state['insights'])} insights")
 
                 elif action.agent == "llm_agent" and action.tool == "polish":
                     # Polish a specific insight by index
@@ -209,7 +209,7 @@ Current state: {state}
                         if "polished_insights" not in self.state:
                             self.state["polished_insights"] = {}
                         self.state["polished_insights"][idx] = polished
-                        print(f"✓ Polished insight {idx}")
+                        print(f"Polished insight {idx}")
 
                 elif action.agent == "ppt_agent" and action.tool == "create_presentation":
                     # Build slides from polished insights or original insights
@@ -235,14 +235,14 @@ Current state: {state}
                     
                     self.state["slides"] = slides[: cfg.max_slides]
                     result = self._execute_tool(action)
-                    print(f"✓ Generated PPT with {len(self.state['slides'])} slides")
+                    print(f"Generated PPT with {len(self.state['slides'])} slides")
                     return result
 
                 else:
-                    print(f"⚠ Unknown action: {action.agent}.{action.tool}")
+                    print(f"Unknown action: {action.agent}.{action.tool}")
 
             except Exception as e:
-                print(f"✗ Error executing {action.agent}.{action.tool}: {e}")
+                print(f"Error executing {action.agent}.{action.tool}: {e}")
                 break
 
         print(f"\nOrchestration finished after {iteration} iterations")
