@@ -1,52 +1,17 @@
-from .agents.dataset_loader import load_csv
-from .agents.insight_extractor import extract_basic_insights
-from .agents.llm_adapter import QWEXAdapter
-from .agents.ppt_generator import create_presentation
-from .models import OrchestratorConfig, PPTSlide
-from typing import Optional, Any
-
-
-def format_details(details: Any) -> str:
-    if not details:
-        return ""
-    if isinstance(details, dict):
-        out = []
-        for k, v in details.items():
-            if isinstance(v, dict):
-                out.append(f"{k}:")
-                for kk, vv in v.items():
-                    out.append(f"- {kk}: {vv}")
-            elif isinstance(v, list):
-                out.append(f"{k}:")
-                for item in v:
-                    out.append(f"- {item}")
-            else:
-                out.append(f"- {k}: {v}")
-        return "\n".join(out)
-    if isinstance(details, list):
-        return "\n".join(f"- {i}" for i in details)
-    return str(details)
+from .ai_orchestrator import AIOrchestrator
+from .models import OrchestratorConfig
+from typing import Optional
 
 
 class CentralOrchestrator:
-    def __init__(self, llm_api_key: Optional[str] = None):
-        self.llm = QWEXAdapter(api_key=llm_api_key)
+    """Facade orchestrator that delegates to the AI-driven orchestrator.
+
+    This keeps the original single-entrypoint API while using AI-driven
+    orchestration to decide which agents to call next.
+    """
+
+    def __init__(self, llm_api_key: Optional[str] = None, model: str = "qwen:0.5b", ollama_base_url: str = "http://localhost:11434"):
+        self._orch = AIOrchestrator(llm_api_key=llm_api_key, model=model, ollama_base_url=ollama_base_url)
 
     def generate_ppt_from_csv(self, csv_path: str, out_pptx: str, cfg: OrchestratorConfig = OrchestratorConfig()):
-        df = load_csv(csv_path)
-        insights = extract_basic_insights(df, max_insights=cfg.max_slides)
-
-        slides = []
-        for ins in insights:
-            # use LLM to polish summary
-            polished = self.llm.summarize(ins.title, ins.summary)
-            content = polished
-            # include short details (formatted)
-            if ins.details:
-                content += "\n\nDetails:\n" + format_details(ins.details)
-            slides.append(PPTSlide(title=ins.title, content=content))
-
-        # Ensure not to exceed max slides
-        slides = slides[: cfg.max_slides]
-        create_presentation(cfg.title, slides, out_pptx)
-        return out_pptx
+        return self._orch.run(csv_path, out_pptx, cfg)
