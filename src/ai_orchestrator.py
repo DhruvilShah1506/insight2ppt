@@ -74,220 +74,41 @@ Current state: {state}
 """
 
     def _decide_next_action(self) -> Optional[ToolCall]:
-        """Call Ollama to dynamically decide the next action based on current state.
+        """Deterministic stepper that decides the next tool to call based on state.
 
-        Uses explicit workflow logic with LLM as decision validator.
-        Provides detailed tool descriptions and examples to guide the model.
+        This method does not call the LLM to pick the next action. It follows a
+        strict sequence: load CSV -> extract insights -> polish each insight -> create PPT.
+        This guarantees predictable, 100% deterministic orchestration.
         """
-        tools_desc = self._get_available_tools()
-        
-        # Build current state summary with explicit flags
+        # Determine flags
         csv_loaded = 'df' in self.state and self.state['df'] is not None
         insights_extracted = 'insights' in self.state and self.state['insights'] is not None and len(self.state.get('insights', [])) > 0
-        all_polished = insights_extracted and len(self.state.get('polished_insights', {})) == len(self.state.get('insights', []))
+        polished_insights = self.state.get('polished_insights', {}) or {}
         ppt_created = 'slides' in self.state and self.state['slides'] is not None
-        
-        state_summary = f"""
-Current Progress:
-✓ CSV loaded: {csv_loaded}
-✓ Insights extracted: {insights_extracted}
-✓ All insights polished: {all_polished}
-✓ PPT created: {ppt_created}
 
-Workflow Rules:
-1. First: load_csv (if not done)
-2. Second: extract_insights (after CSV loaded)
-3. Third: polish each insight one-by-one (after insights extracted)
-4. Fourth: create_presentation (after all polishing done)
-"""
-        
-        # Determine next logical step based on state progression
+        # 1) Load CSV if missing
         if not csv_loaded:
-            # Step 1: Load CSV
-            action_guidance = """
-NEXT STEP: Load CSV file.
-Use EXACTLY this format (lowercase, no spaces, single underscores):
-{
-  "agent": "data_agent",
-  "tool": "load_csv",
-  "args": {
-    "csv_path": "%s"
-  },
-  "done": false
-}
-""" % self.state.get("csv_path", "")
-        
-        elif not insights_extracted:
-            # Step 2: Extract insights
-            action_guidance = """
-NEXT STEP: Extract insights from loaded CSV.
-Use EXACTLY this format (lowercase, no spaces, single underscores):
-{
-  "agent": "data_agent",
-  "tool": "extract_insights",
-  "args": {
-    "df": "dataframe",
-    "max_insights": 6
-  },
-  "done": false
-}
-"""
-        
-        elif not all_polished:
-            # Step 3: Polish insights one by one
-            num_insights = len(self.state.get('insights', []))
-            print(f"Debug: {num_insights} insights extracted, {len(self.state.get('polished_insights', {}))} polished")
-            polished_count = len(self.state.get('polished_insights', {}))
-            next_idx = polished_count
-            
-            if next_idx < num_insights:
-                insight = self.state['insights'][next_idx]
-                action_guidance = f"""
-NEXT STEP: Polish insight #{next_idx + 1} of {num_insights}.
-Use EXACTLY this format (lowercase, no spaces, single underscores):
-{{
-  "agent": "llm_agent",
-  "tool": "polish",
-  "args": {{
-    "insight_index": {next_idx},
-    "title": "{insight.title}",
-    "summary": "{insight.summary}"
-  }},
-  "done": false
-}}
-"""
-            else:
-                action_guidance = """
-NEXT STEP: All insights polished. Create presentation now.
-Use EXACTLY this format (lowercase, no spaces, single underscores):
-{
-  "agent": "ppt_agent",
-  "tool": "create_presentation",
-  "args": {
-    "title": "slides_title",
-    "slides": "prepared_slides",
-    "out_path": "output_path"
-  },
-  "done": false
-}
-"""
-        
-        elif not ppt_created:
-            # Step 4: Generate PPT
-            action_guidance = """
-NEXT STEP: Create PowerPoint presentation.
-JSON Response MUST be:
-{
-  "agent": "ppt_agent",
-  "tool": "create_presentation",
-  "args": {
-    "title": "slides_title",
-    "slides": "prepared_slides",
-    "out_path": "output_path"
-  },
-  "done": false
-}
-Note: Use string references, system will provide actual objects.
-"""
-        
-        else:
-            # Workflow complete
-            return None
-        
-        # Build prompt with explicit examples and guidance
-        prompt = f"""{tools_desc}
+            return ToolCall(agent="data_agent", tool="load_csv", args={"csv_path": self.state.get("csv_path")})
 
-{state_summary}
+        # 2) Extract insights if missing
+        if not insights_extracted:
+            return ToolCall(agent="data_agent", tool="extract_insights", args={"df": "dataframe", "max_insights": self.state.get("max_insights", 6)})
 
-{action_guidance}
+        # 3) Polish insights one-by-one
+        insights = self.state.get('insights', [])
+        for idx in range(len(insights)):
+            if idx not in polished_insights:
+                ins = insights[idx]
+                return ToolCall(agent="llm_agent", tool="polish", args={"insight_index": idx, "title": ins.title, "summary": ins.summary})
 
-CRITICAL INSTRUCTIONS:
-- Respond ONLY with valid JSON in a single compact line or multiline.
-- NO markdown, NO code blocks, NO triple backticks, NO "json" prefix.
-- NO comments (// or /* */ or () comments) INSIDE the JSON object.
-- NO explanatory text after the JSON.
-- Agent and tool names: use LOWERCASE, NO SPACES, SINGLE UNDERSCORES only.
-- Your response must start with {{ and end with }}.
-- Example: {{"agent": "data_agent", "tool": "load_csv", "args": {{}}, "done": false}}
-"""
+        # 4) Create PPT if not done
+        if not ppt_created:
+            return ToolCall(agent="ppt_agent", tool="create_presentation", args={"title": "slides_title", "slides": "prepared_slides", "out_path": "output_path"})
 
-        try:
-            response = self.llm._call_ollama(prompt, max_tokens=300)
-            print(f"LLM Response: {response[:200]}...")  # Debug: see first 200 chars
-            
-            # Remove comments from JSON (// style comments)
-            response_clean = response.split('//')[0].strip()
-            
-            # Remove inline comments like "(system provides ...)" from within JSON values
-            # This regex removes text in parentheses
-            import re
-            response_clean = re.sub(r'\s*\([^)]*\)\s*', ' ', response_clean)
-            
-            # Escape backslashes in the response for valid JSON parsing
-            response_clean = response_clean.replace('\\', '\\\\')
-            
-            # Extract the JSON object by finding matching braces
-            start_idx = response_clean.find('{')
-            if start_idx == -1:
-                print(f"⚠ Could not find JSON start in response")
-                return None
-            
-            # Count braces to find the complete JSON object
-            brace_count = 0
-            end_idx = start_idx
-            for i in range(start_idx, len(response_clean)):
-                if response_clean[i] == '{':
-                    brace_count += 1
-                elif response_clean[i] == '}':
-                    brace_count -= 1
-                    if brace_count == 0:
-                        end_idx = i + 1
-                        break
-            
-            if brace_count != 0:
-                print(f"⚠ Incomplete JSON (unmatched braces)")
-                return None
-            
-            json_str = response_clean[start_idx:end_idx]
-            
-            try:
-                action_dict = json.loads(json_str)
-            except json.JSONDecodeError as e:
-                print(f"⚠ JSON parsing error: {e}")
-                print(f"   Cleaned response: {response_clean[:150]}")
-                return None
-            
-            # Validate response structure
-            if not action_dict.get("agent") or not action_dict.get("tool"):
-                print(f"⚠ Invalid action structure: {action_dict}")
-                return None
-            
-            # Check if done
-            if action_dict.get("done", False):
-                return None
-            
-            # Build and return ToolCall
-            # Normalize agent and tool names aggressively:
-            # - Remove spaces
-            # - Replace multiple underscores with single underscore
-            # - Convert to lowercase
-            agent = action_dict.get("agent", "").strip().replace(" ", "").lower()
-            agent = re.sub(r'_+', '_', agent)  # Replace multiple underscores with single
-            
-            tool = action_dict.get("tool", "").strip().replace(" ", "").lower()
-            tool = re.sub(r'_+', '_', tool)  # Replace multiple underscores with single
-            
-            return ToolCall(
-                agent=agent,
-                tool=tool,
-                args=action_dict.get("args", {})
-            )
-        except json.JSONDecodeError as e:
-            print(f"⚠ JSON parsing error: {e}")
-            return None
-        except Exception as e:
-            print(f"✗ Error in LLM decision: {e}")
-            return None
+        # Done
+        return None
+
+    
 
     def _execute_tool(self, tool_call: ToolCall) -> Any:
         """Execute the tool call and return result."""
@@ -296,20 +117,18 @@ CRITICAL INSTRUCTIONS:
         args = tool_call.args
 
         # Map string references in args to actual state objects
-        # This allows LLM to say "df" and we use the actual DataFrame from state
         resolved_args = {}
         for key, value in args.items():
             if isinstance(value, str) and value.lower() == "dataframe":
-                # Use the actual DataFrame from state
+                resolved_args[key] = self.state.get("df")
+            elif isinstance(value, int) and key == "df":
+                # LLM sometimes outputs 1 or 2 instead of "dataframe"
                 resolved_args[key] = self.state.get("df")
             elif isinstance(value, str) and value.lower() == "prepared_slides":
-                # Use the prepared slides from state
                 resolved_args[key] = self.state.get("slides")
             elif isinstance(value, str) and value.lower() == "output_path":
-                # Use the output path from state
                 resolved_args[key] = self.state.get("out_pptx")
             elif isinstance(value, str) and value.lower() == "slides_title":
-                # Use the title from state
                 resolved_args[key] = self.state.get("title")
             else:
                 resolved_args[key] = value
@@ -319,7 +138,7 @@ CRITICAL INSTRUCTIONS:
                 return load_csv(resolved_args.get("csv_path"))
             elif tool == "extract_insights":
                 return extract_basic_insights(
-                    resolved_args.get("df"), 
+                    resolved_args.get("df"),
                     max_insights=resolved_args.get("max_insights", 6)
                 )
         elif agent == "llm_agent":
