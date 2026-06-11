@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 
 class Insight(BaseModel):
@@ -11,6 +11,8 @@ class Insight(BaseModel):
 class PPTSlide(BaseModel):
     title: str
     content: str
+    background_image: Optional[str] = None
+    numeric_values: Optional[Dict[str, float]] = None
 
 
 class OrchestratorConfig(BaseModel):

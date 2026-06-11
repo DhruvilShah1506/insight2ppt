@@ -149,10 +149,14 @@ Current state: {state}
                 )
         elif agent == "ppt_agent":
             if tool == "create_presentation":
+                # Pass through optional background and enable small graphs by default
                 return create_presentation(
                     resolved_args.get("title"),
                     resolved_args.get("slides"),
-                    resolved_args.get("out_path")
+                    resolved_args.get("out_path"),
+                    background_image=resolved_args.get("background_image"),
+                    add_small_graph=resolved_args.get("add_small_graph", True),
+                    add_fancy_graph=resolved_args.get("add_fancy_graph", False)
                 )
 
         raise ValueError(f"Unknown tool: {agent}.{tool}")
@@ -215,7 +219,19 @@ Current state: {state}
                         content = polished
                         if ins.details:
                             content += "\n\nDetails:\n" + self._format_details(ins.details)
-                        slides.append(PPTSlide(title=ins.title, content=content))
+                            # extract numeric values from details for charts
+                            numeric_values = {}
+                            try:
+                                for k, v in ins.details.items():
+                                    if isinstance(v, (int, float)):
+                                        numeric_values[k] = v
+                                    elif isinstance(v, dict):
+                                        for kk, vv in v.items():
+                                            if isinstance(vv, (int, float)):
+                                                numeric_values[f"{k}.{kk}"] = vv
+                            except Exception:
+                                numeric_values = None
+                            slides.append(PPTSlide(title=ins.title, content=content, numeric_values=numeric_values))
                     
                     self.state["slides"] = slides[: cfg.max_slides]
                     result = self._execute_tool(action)
