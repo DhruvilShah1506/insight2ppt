@@ -1,6 +1,7 @@
 from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.enum.text import MSO_AUTO_SIZE
+from pptx.dml.color import RGBColor
 from typing import List
 from ..models import PPTSlide
 import tempfile
@@ -208,6 +209,14 @@ def create_presentation(title: str, slides: List[PPTSlide], out_path: str, backg
     # Title slide
     title_slide_layout = prs.slide_layouts[0]
     slide = prs.slides.add_slide(title_slide_layout)
+    # Apply a subtle background to title slide
+    try:
+        bg = slide.background
+        fill = bg.fill
+        fill.solid()
+        fill.fore_color.rgb = RGBColor(245, 248, 252)
+    except Exception:
+        pass
     slide.shapes.title.text = title
 
     for s in slides:
@@ -229,6 +238,18 @@ def create_presentation(title: str, slides: List[PPTSlide], out_path: str, backg
                 slide.shapes._spTree.insert(2, pic._element)
             except Exception:
                 # ignore background failures
+                pass
+        else:
+            # Apply a subtle solid background color per-slide for visual polish
+            try:
+                bg = slide.background
+                fill = bg.fill
+                fill.solid()
+                # Pick a subtle color variant based on slide title hash to add mild variation
+                palette = [RGBColor(250, 251, 253), RGBColor(247, 249, 252), RGBColor(250, 248, 244), RGBColor(245, 248, 252)]
+                idx = abs(hash(getattr(s, 'title', s.title if hasattr(s, 'title') else title) or title)) % len(palette)
+                fill.fore_color.rgb = palette[idx]
+            except Exception:
                 pass
 
         if slide.shapes.title:
@@ -310,17 +331,19 @@ def create_presentation(title: str, slides: List[PPTSlide], out_path: str, backg
                         _make_fancy_chart_from_text(s.content or s.title or '', chart_path)
                     else:
                         _make_small_chart_image(s.content or s.title or '', chart_path)
-                # Insert chart: larger and centered for fancy graphs, small bottom-right otherwise
+                # Insert chart: increase sizes and display centered on slide
+                # Fancy graphs: larger and centered both horizontally and vertically
                 if add_fancy_graph:
-                    pic_width = Inches(4.0)
-                    pic_height = Inches(2.5)
+                    pic_width = Inches(5.0)
+                    pic_height = Inches(3.0)
                     pic_left = (prs.slide_width - pic_width) / 2
-                    pic_top = prs.slide_height - pic_height - Inches(0.4)
+                    pic_top = (prs.slide_height - pic_height) / 2
                 else:
-                    pic_width = Inches(2.0)
-                    pic_height = Inches(1.5)
-                    pic_left = prs.slide_width - pic_width - Inches(0.3)
-                    pic_top = prs.slide_height - pic_height - Inches(0.3)
+                    # Small graphs: bigger than before and centered
+                    pic_width = Inches(3.5)
+                    pic_height = Inches(2.0)
+                    pic_left = (prs.slide_width - pic_width) / 2
+                    pic_top = (prs.slide_height - pic_height) / 2
                 slide.shapes.add_picture(chart_path, pic_left, pic_top, width=pic_width, height=pic_height)
                 try:
                     os.remove(chart_path)
