@@ -254,15 +254,48 @@ def create_presentation(title: str, slides: List[PPTSlide], out_path: str, backg
     # Title slide
     title_slide_layout = prs.slide_layouts[0]
     slide = prs.slides.add_slide(title_slide_layout)
-    # Apply a subtle background to title slide
+    # Apply a white->purple gradient background for the title slide (use PIL if available)
     try:
-        bg = slide.background
-        fill = bg.fill
-        fill.solid()
-        fill.fore_color.rgb = RGBColor(245, 248, 252)
+        if Image is not None:
+            fd, title_bg = tempfile.mkstemp(suffix='.png')
+            os.close(fd)
+            dpi = 150
+            try:
+                width_px = int(prs.slide_width / 914400 * dpi)
+                height_px = int(prs.slide_height / 914400 * dpi)
+            except Exception:
+                width_px, height_px = 1920, 1080
+            # soft white->lavender for title
+            c1, c2 = (255, 255, 255), (245, 235, 255)
+            _make_gradient_background(title_bg, width_px, height_px, c1, c2)
+            try:
+                pic = slide.shapes.add_picture(title_bg, 0, 0, width=prs.slide_width, height=prs.slide_height)
+                slide.shapes._spTree.remove(pic._element)
+                slide.shapes._spTree.insert(2, pic._element)
+            except Exception:
+                pass
+            try:
+                os.remove(title_bg)
+            except Exception:
+                pass
+        else:
+            bg = slide.background
+            fill = bg.fill
+            fill.solid()
+            fill.fore_color.rgb = RGBColor(245, 248, 252)
     except Exception:
         pass
-    slide.shapes.title.text = title
+
+    # Style title text for the title slide
+    try:
+        slide.shapes.title.text = title
+        tf_title = slide.shapes.title.text_frame
+        p = tf_title.paragraphs[0]
+        p.font.size = Pt(44)
+        p.font.bold = True
+        p.font.color.rgb = RGBColor(48, 25, 107)
+    except Exception:
+        slide.shapes.title.text = title
 
     for s in slides:
         layout = prs.slide_layouts[1] if len(s.content) < 800 else prs.slide_layouts[5]
@@ -440,19 +473,16 @@ def create_presentation(title: str, slides: List[PPTSlide], out_path: str, backg
                         _make_fancy_chart_from_text(s.content or s.title or '', chart_path)
                     else:
                         _make_small_chart_image(s.content or s.title or '', chart_path)
-                # Insert chart: increase sizes and display centered on slide
-                # Fancy graphs: larger and centered both horizontally and vertically
+                # Insert chart: increase sizes and display centered at bottom (above ribbon)
+                bottom_margin = Inches(0.6)  # space above bottom edge / ribbon
                 if add_fancy_graph:
                     pic_width = Inches(5.0)
                     pic_height = Inches(3.0)
-                    pic_left = (prs.slide_width - pic_width) / 2
-                    pic_top = (prs.slide_height - pic_height) / 2
                 else:
-                    # Small graphs: bigger than before and centered
                     pic_width = Inches(3.5)
                     pic_height = Inches(2.0)
-                    pic_left = (prs.slide_width - pic_width) / 2
-                    pic_top = (prs.slide_height - pic_height) / 2
+                pic_left = (prs.slide_width - pic_width) / 2
+                pic_top = prs.slide_height - pic_height - bottom_margin
                 slide.shapes.add_picture(chart_path, pic_left, pic_top, width=pic_width, height=pic_height)
                 try:
                     os.remove(chart_path)
