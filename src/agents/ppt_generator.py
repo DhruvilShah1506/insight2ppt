@@ -251,38 +251,63 @@ def _format_value(v):
 
 def create_presentation(title: str, slides: List[PPTSlide], out_path: str, background_image: str = None, add_small_graph: bool = False, add_fancy_graph: bool = False) -> str:
     prs = Presentation()
+    # If no background_image provided, try to use sample white->purple background bg_wp_3.png
+    if not background_image:
+        try:
+            repo_root = os.getcwd()
+            candidate = os.path.join(repo_root, 'sample_backgrounds', 'bg_wp_3.png')
+            if os.path.exists(candidate):
+                background_image = candidate
+            else:
+                # fallback: any bg_wp_*.png in sample_backgrounds
+                sb_dir = os.path.join(repo_root, 'sample_backgrounds')
+                if os.path.isdir(sb_dir):
+                    for fn in sorted(os.listdir(sb_dir)):
+                        if fn.startswith('bg_wp_') and fn.lower().endswith('.png'):
+                            background_image = os.path.join(sb_dir, fn)
+                            break
+        except Exception:
+            background_image = background_image
     # Title slide
     title_slide_layout = prs.slide_layouts[0]
     slide = prs.slides.add_slide(title_slide_layout)
-    # Apply a white->purple gradient background for the title slide (use PIL if available)
+    # Apply background for the title slide: prefer provided background_image, otherwise fall back to generated gradient
     try:
-        if Image is not None:
-            fd, title_bg = tempfile.mkstemp(suffix='.png')
-            os.close(fd)
-            dpi = 150
+        if background_image and os.path.exists(background_image):
             try:
-                width_px = int(prs.slide_width / 914400 * dpi)
-                height_px = int(prs.slide_height / 914400 * dpi)
-            except Exception:
-                width_px, height_px = 1920, 1080
-            # soft white->lavender for title
-            c1, c2 = (255, 255, 255), (245, 235, 255)
-            _make_gradient_background(title_bg, width_px, height_px, c1, c2)
-            try:
-                pic = slide.shapes.add_picture(title_bg, 0, 0, width=prs.slide_width, height=prs.slide_height)
+                pic = slide.shapes.add_picture(background_image, 0, 0, width=prs.slide_width, height=prs.slide_height)
                 slide.shapes._spTree.remove(pic._element)
                 slide.shapes._spTree.insert(2, pic._element)
             except Exception:
                 pass
-            try:
-                os.remove(title_bg)
-            except Exception:
-                pass
         else:
-            bg = slide.background
-            fill = bg.fill
-            fill.solid()
-            fill.fore_color.rgb = RGBColor(245, 248, 252)
+            if Image is not None:
+                fd, title_bg = tempfile.mkstemp(suffix='.png')
+                os.close(fd)
+                dpi = 150
+                try:
+                    width_px = int(prs.slide_width / 914400 * dpi)
+                    height_px = int(prs.slide_height / 914400 * dpi)
+                except Exception:
+                    width_px, height_px = 1920, 1080
+                # soft white->lavender for title
+                c1, c2 = (255, 255, 255), (245, 235, 255)
+                _make_gradient_background(title_bg, width_px, height_px, c1, c2)
+                try:
+                    pic = slide.shapes.add_picture(title_bg, 0, 0, width=prs.slide_width, height=prs.slide_height)
+                    slide.shapes._spTree.remove(pic._element)
+                    slide.shapes._spTree.insert(2, pic._element)
+                except Exception:
+                    pass
+                try:
+                    os.remove(title_bg)
+                except Exception:
+                    pass
+            else:
+                bg = slide.background
+                fill = bg.fill
+                fill.solid()
+                fill.fore_color.rgb = RGBColor(245, 248, 252)
     except Exception:
         pass
 
