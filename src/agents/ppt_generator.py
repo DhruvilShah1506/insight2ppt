@@ -2,6 +2,12 @@ from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.enum.text import MSO_AUTO_SIZE
 from pptx.dml.color import RGBColor
+from pptx.enum.shapes import MSO_SHAPE
+try:
+    from PIL import Image, ImageDraw
+except Exception:
+    Image = None
+    ImageDraw = None
 from typing import List
 from ..models import PPTSlide
 import tempfile
@@ -187,6 +193,45 @@ def _make_fancy_chart_from_text(text: str, target_path: str) -> None:
     plt.close(fig)
 
 
+def _make_gradient_background(path: str, width_px: int, height_px: int, color1: tuple, color2: tuple) -> None:
+    """Create a vertical gradient PNG from color1 to color2 at given pixel size."""
+    if Image is None:
+        return
+    try:
+        base = Image.new('RGB', (width_px, height_px), color1)
+        top = Image.new('RGB', (width_px, height_px), color2)
+        mask = Image.new('L', (width_px, height_px))
+        mask_data = []
+        # vertical gradient mask from top (color1) to bottom (color2)
+        for y in range(height_px):
+            mask_data.extend([int(255 * (y / max(1, height_px - 1)))] * width_px)
+        mask.putdata(mask_data)
+        grad = Image.composite(top, base, mask)
+        # Add a subtle vertical vignette to darken top/bottom edges for a professional look
+        try:
+            vignette = Image.new('L', (width_px, height_px))
+            vdata = []
+            cy = height_px / 2.0
+            for y in range(height_px):
+                # distance from center (0..1)
+                d = abs((y - cy) / cy)
+                # curve to increase effect towards edges
+                alpha = int(180 * (d ** 1.4))
+                vdata.extend([alpha] * width_px)
+            vignette.putdata(vdata)
+            # create a semi-transparent black overlay and composite it
+            black = Image.new('RGBA', (width_px, height_px), (0, 0, 0, 0))
+            black.putalpha(vignette)
+            grad = grad.convert('RGBA')
+            grad = Image.alpha_composite(grad, black)
+            grad = grad.convert('RGB')
+        except Exception:
+            pass
+        grad.save(path, format='PNG')
+    except Exception:
+        return
+
+
 def _format_value(v):
     """Format numeric values: use percent for 0..1 floats, commas for large ints."""
     try:
@@ -240,20 +285,84 @@ def create_presentation(title: str, slides: List[PPTSlide], out_path: str, backg
                 # ignore background failures
                 pass
         else:
-            # Apply a subtle solid background color per-slide for visual polish
+            # Try to generate a fancy gradient PNG background (PIL required).
             try:
-                bg = slide.background
-                fill = bg.fill
-                fill.solid()
-                # Pick a subtle color variant based on slide title hash to add mild variation
-                palette = [RGBColor(250, 251, 253), RGBColor(247, 249, 252), RGBColor(250, 248, 244), RGBColor(245, 248, 252)]
-                idx = abs(hash(getattr(s, 'title', s.title if hasattr(s, 'title') else title) or title)) % len(palette)
-                fill.fore_color.rgb = palette[idx]
+                if Image is not None:
+                    # Create a temporary PNG background sized to slide dimensions
+                    fd, bg_path = tempfile.mkstemp(suffix='.png')
+                    os.close(fd)
+                    # Convert EMU to pixels: 1 inch = 914400 EMU. Use 150 DPI for good quality.
+                    try:
+                        dpi = 150
+                        width_px = int(prs.slide_width / 914400 * dpi)
+                        height_px = int(prs.slide_height / 914400 * dpi)
+                    except Exception:
+                        width_px, height_px = 1920, 1080
+
+                    # Pick two colors from a small palette based on slide title hash
+                    palette_pairs = [((250, 251, 253), (235, 244, 255)), ((247, 249, 252), (236, 245, 242)), ((250, 248, 244), (255, 243, 230)), ((245, 248, 252), (237, 242, 250))]
+                    idx = abs(hash(getattr(s, 'title', s.title if hasattr(s, 'title') else title) or title)) % len(palette_pairs)
+                    c1, c2 = palette_pairs[idx]
+                    _make_gradient_background(bg_path, width_px, height_px, c1, c2)
+                    # Insert generated background image behind other shapes
+                    try:
+                        pic = slide.shapes.add_picture(bg_path, 0, 0, width=prs.slide_width, height=prs.slide_height)
+                        slide.shapes._spTree.remove(pic._element)
+                        slide.shapes._spTree.insert(2, pic._element)
+                    except Exception:
+                        pass
+                    try:
+                        os.remove(bg_path)
+                    except Exception:
+                        pass
+                else:
+                    # Fallback to solid color if PIL not available
+                    bg = slide.background
+                    fill = bg.fill
+                    fill.solid()
+                    palette = [RGBColor(250, 251, 253), RGBColor(247, 249, 252), RGBColor(250, 248, 244), RGBColor(245, 248, 252)]
+                    idx = abs(hash(getattr(s, 'title', s.title if hasattr(s, 'title') else title) or title)) % len(palette)
+                    fill.fore_color.rgb = palette[idx]
+            except Exception:
+                # If anything goes wrong, ignore and continue
+                pass
+
+        # Add decorative accents (purple ribbon and circular shape) to emulate the provided template
+        try:
+            # Purple bottom ribbon
+            ribbon_height = Inches(0.5)
+            ribbon = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, prs.slide_height - ribbon_height, prs.slide_width, ribbon_height)
+            ribbon.fill.solid()
+            ribbon.fill.fore_color.rgb = RGBColor(111, 66, 193)
+            try:
+                ribbon.line.fill.background()
             except Exception:
                 pass
 
+            # Decorative circle on the right
+            circ_w = Inches(2.4)
+            circ_h = Inches(2.4)
+            circ = slide.shapes.add_shape(MSO_SHAPE.OVAL, prs.slide_width - circ_w + Inches(0.4), Inches(0.6), circ_w, circ_h)
+            circ.fill.solid()
+            circ.fill.fore_color.rgb = RGBColor(148, 103, 255)
+            try:
+                circ.line.fill.background()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
         if slide.shapes.title:
-            slide.shapes.title.text = s.title
+            # Style the title to match modern business templates
+            try:
+                slide.shapes.title.text = s.title
+                tf_title = slide.shapes.title.text_frame
+                p = tf_title.paragraphs[0]
+                p.font.size = Pt(28)
+                p.font.bold = True
+                p.font.color.rgb = RGBColor(48, 25, 107)
+            except Exception:
+                slide.shapes.title.text = s.title
         # Add body
         left = Inches(0.5)
         top = Inches(1.5)
