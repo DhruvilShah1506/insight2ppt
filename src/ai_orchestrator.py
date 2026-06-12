@@ -29,7 +29,8 @@ class AIOrchestrator:
     not hardcoded step sequences.
     """
 
-    def __init__(self, llm_api_key: Optional[str] = None, model: str = "qwen:0.5b", ollama_base_url: str = "http://localhost:11434"):
+    def __init__(self, llm_api_key: Optional[str] = None, model: str = "Qwen/Qwen2-7B-Instruct", ollama_base_url: str = "http://localhost:8000"):
+        # Default to a local GPU chat server (chat-completions style) and a larger Qwen model
         self.llm = QWEXAdapter(api_key=llm_api_key, model=model, base_url=ollama_base_url)
         self.state = {}
 

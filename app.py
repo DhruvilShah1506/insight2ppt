@@ -10,9 +10,9 @@ st.title("Executive Insight Generator")
 # Ollama configuration
 col1, col2 = st.columns(2)
 with col1:
-    ollama_url = st.text_input("Ollama URL", value="http://localhost:11434", help="Default: http://localhost:11434")
+    ollama_url = st.text_input("Ollama URL", value="http://localhost:8000", help="Default: http://localhost:8000")
 with col2:
-    model_name = st.text_input("Model Name", value="qwen:0.5b", help="e.g., qwen:0.5b, qwen2.5")
+    model_name = st.text_input("Model Name", value="Qwen/Qwen2-7B-Instruct", help="e.g., Qwen/Qwen2-7B-Instruct or qwen:0.5b")
 
 uploaded = st.file_uploader("Upload CSV", type=["csv"]) 
 if uploaded is not None:
